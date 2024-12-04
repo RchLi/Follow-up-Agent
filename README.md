@@ -24,7 +24,17 @@ print(f"Agent: {response.text}")
 ```
 ### Check for follow-ups
 ```python
-followups = agent.check_followups()[-1]
+followup = agent.check_followups()[-1]
 followup_msg, followup_type = agent.generate_followup_message(followup)
 print(f"Follow-up({followup_type}): {followup_msg}")
 ```
+
+### Example Results
+```
+User: 我凌晨1点后有空，到时候再聊吧
+Added user message to memory: 我凌晨1点后有空，到时候再聊吧
+Follow-up(short_term): 你好！现在已经过了1点，你有空聊聊吗？期待你的回复！
+```
+
+## Result on test data
+![test result](./data/test_result.png)

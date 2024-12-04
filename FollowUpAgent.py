@@ -217,13 +217,11 @@ if __name__ == "__main__":
     agent = FollowUpAgent(api_key)
     
     # Example conversation
-    response = agent.process_message("我凌晨0点后有空，到时候再聊吧", "user1")
-    print(f"Agent: {response}")
+    response = agent.process_message("我凌晨1点后有空，到时候再聊吧", "user1")
+    # print(f"Agent: {response}")
     
     # Check for follow-ups (would typically be run by a scheduler)
-    followups = agent.check_followups()
-
-    for followup in followups:
-        followup_msg, followup_type = agent.generate_followup_message(followup)
-        print(f"Follow-up({followup_type}): {followup_msg}")
+    followup = agent.check_followups()[-1]
+    followup_msg, followup_type = agent.generate_followup_message(followup)
+    print(f"Follow-up({followup_type}): {followup_msg}")
 
