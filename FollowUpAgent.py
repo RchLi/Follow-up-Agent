@@ -31,16 +31,16 @@ class FollowUpMemory(BaseMemory):
       
      
         # Extract follow-up timing using LLM
-        if message.role == MessageRole.USER:
-            content = message.content
-            # Analyze content for timing mentions
-            timing_info = self._extract_timing_info(content)
-            if timing_info:
-                message_id = f"msg-{datetime.now().timestamp()}"
-                if timing_info["type"] == "short_term":
-                    self._short_term_memory[message_id] = timing_info
-                else:
-                    self._long_term_memory[message_id] = timing_info
+        # if message.role == MessageRole.USER:
+        content = message.content
+        # Analyze content for timing mentions
+        timing_info = self._extract_timing_info(content)
+        if timing_info:
+            message_id = f"msg-{datetime.now().timestamp()}"
+            if timing_info["type"] == "short_term":
+                self._short_term_memory[message_id] = timing_info
+            else:
+                self._long_term_memory[message_id] = timing_info
 
         
     def get(self) -> Optional[List[Dict]]:
@@ -49,6 +49,7 @@ class FollowUpMemory(BaseMemory):
     
     def _extract_timing_info(self, content: str) -> Optional[Dict]:
         """Extract timing information from message content"""
+        """Extract timing information from message content"""
         timing_prompt = f"""
         Extract follow-up timing information from this message. Look for:
         1. Short-term timing (same day appointments, specific times)
@@ -56,20 +57,34 @@ class FollowUpMemory(BaseMemory):
         
         Message: {content}
         Current time: {datetime.now().isoformat()}
-        Return in the form:
-        {{
-        "type": "short_term" or "long_term",
-        "follow_up_time": standard datetime or date string
-        "context": why we need to follow up
-        }}
-        Return null if no timing information found.
+
+        Respond with a valid JSON object containing:
+        - "type": either "short_term" or "long_term"
+        - "follow_up_time": datetime string in ISO format
+        - "context": brief explanation of the follow-up
+        
+        Example response:
+        {{"type": "short_term", "follow_up_time": "2024-12-05T15:00:00", "context": "Student available at 3 PM"}}
+        
+        Return only the JSON object, no additional text or formatting.
+        Return string null if no timing information found.
         """
         
         response = self.llm.complete(timing_prompt)
         
-        # Assuming response is a string, parse it as JSON
+        # Clean up the response to ensure it's valid JSON
+        json_str = response.text.strip()
+        # Remove any markdown code block markers if present
+        json_str = json_str.replace('```json', '').replace('```', '')
+        # Remove any Response: prefix if present
+        if 'Response:' in json_str:
+            json_str = json_str.split('Response:', 1)[1]
+        json_str = json_str.strip()
+  
+        if json_str == "null":
+            return None
         try:
-            timing_info = json.loads(response.text)
+            timing_info = json.loads(json_str)
             return timing_info
         except json.JSONDecodeError:
             # Handle the case where the response is not valid JSON
@@ -82,6 +97,7 @@ class FollowUpMemory(BaseMemory):
         pending_followups = []
        
         # Check short-term follow-ups
+        to_delete = []
         for msg_id, timing in self._short_term_memory.items():
             follow_up_time = datetime.fromisoformat(timing["follow_up_time"])  # Convert string to datetime
             if current_time >= follow_up_time:
@@ -90,7 +106,14 @@ class FollowUpMemory(BaseMemory):
                     "type": "short_term",
                     "context": timing["context"]
                 })
-                
+                # delete the message from memory
+                to_delete.append(msg_id)
+
+        # delete the messages that are already triggered
+        for msg_id in to_delete:
+            del self._short_term_memory[msg_id]
+
+        to_delete = []
         # Check long-term follow-ups
         for msg_id, timing in self._long_term_memory.items():
             follow_up_time = datetime.fromisoformat(timing["follow_up_time"])  # Convert string to datetime
@@ -100,6 +123,11 @@ class FollowUpMemory(BaseMemory):
                     "type": "long_term",
                     "context": timing["context"]
                 })
+            
+                to_delete.append(msg_id)
+
+        for msg_id in to_delete:
+            del self._long_term_memory[msg_id]
                 
         return pending_followups
     
@@ -124,7 +152,7 @@ class FollowUpMemory(BaseMemory):
 
 class FollowUpAgent:
     def __init__(self, api_key: str):
-        self.llm = OpenAI(api_key=api_key, model="gpt-4o-mini")
+        self.llm = OpenAI(api_key=api_key, model="gpt-4o")
         self.memory = FollowUpMemory(llm=self.llm)
         self.agent = OpenAIAgent.from_tools(
             llm=self.llm,
@@ -167,27 +195,18 @@ class FollowUpAgent:
         if followup_type is None:
             followup_type = followup['type']
 
-        if followup_type == 'short_term':
-            followup_prompt = f"""
-            Generate 简短的中文短信for a short-term follow-up.
-            Follow-up context: {followup['context']}
-            
-            The message should be:
-            1. Brief and to the point
-            2. Friendly and polite
-            """
-        else:  # long_term
-            followup_prompt = f"""
-            Generate 中文短信 for a long-term follow-up.
-            Quickly summarize the user's needs from the previous conversation.
-            Previous conversation: {context}
-            Follow-up context: {followup['context']}
-            
-            The message should be:
-            1. Personal and reference previous conversation from the user
-            2. Empathetic and friendly
-            3. Clear about why we're following up
-            """
+        
+        followup_prompt = f"""
+        Generate 简短的中文短信 for a follow-up.
+        Previous conversation: {context}
+        Follow-up type: {followup_type}
+        Follow-up context: {followup['context']}
+        
+        The message should taken into account the previous conversation and the follow-up context and be:
+        1. Brief and to the point
+        2. Friendly and polite
+        3. Clear about why we're following up
+        """
         
         response = self.llm.complete(followup_prompt)
         return str(response), followup_type
